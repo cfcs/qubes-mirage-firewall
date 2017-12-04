@@ -116,19 +116,35 @@ let nat_to t ~host ~port packet =
 
 (* Handle incoming packets *)
 
-let apply_rules t rules info =
-  let packet = info.packet in
-  match rules info, info.dst with
-  | `Accept, `Client client_link -> transmit_ipv4 packet client_link
-  | `Accept, (`External _ | `NetVM) -> transmit_ipv4 packet t.Router.uplink
-  | `Accept, (`Firewall_uplink | `Client_gateway) ->
-      Log.warn (fun f -> f "Bad rule: firewall can't accept packets %a" pp_packet info);
-      return ()
-  | `NAT, _ -> add_nat_and_forward_ipv4 t packet
-  | `NAT_to (host, port), _ -> nat_to t packet ~host ~port
-  | `Drop reason, _ ->
-      Log.info (fun f -> f "Dropped packet (%s) %a" reason pp_packet info);
-      return ()
+let apply_rules t (context:[>]) (info:Packet.info) =
+  Rules.apply_rules ~default_action:(fun (_,_)-> return ())
+    Rules.[
+      begin function
+      | `Accept, {dst = `Client client_link ; _} ->
+        Action (fun (_, {packet;_}) -> transmit_ipv4 packet client_link)
+      | `Accept, {dst = (`External _ | `NetVM) ; _} ->
+        Action (function _, {packet;_} -> transmit_ipv4 packet t.Router.uplink)
+      | `Accept, {dst = (`Firewall_uplink | `Client_gateway); _} ->
+        Action (function _, (info:Packet.info) ->
+              Log.warn (fun f ->
+                f "Bad rule: firewall can't accept packets %a" pp_packet info);
+              return ()
+          )
+      | `NAT, _ ->
+        Action (function _, {packet;_} -> add_nat_and_forward_ipv4 t packet)
+      | `NAT_to (host, port), _ ->
+        Action (function _, {packet;_}-> nat_to t packet ~host ~port)
+      | `Drop reason, _ ->
+        Action (function _, _ ->
+            Log.info (fun f -> f "Dropped packet (%s) %a"
+                         reason pp_packet info);
+            return () )
+      | _-> No_decision
+        end
+    ]
+    (context,info)
+  |> fun handle ->
+  handle (context,info)
 
 let handle_low_memory t =
   match Memory_pressure.status () with
@@ -146,10 +162,20 @@ let ipv4_from_client t packet =
   translate t packet >>= function
   | Some frame -> forward_ipv4 t frame  (* Some existing connection or redirect *)
   | None ->
+  (* Decide what to do with a packet from a client VM.
+     Note: If the packet matched an existing NAT rule then this isn't called. *)
+  let from_client = function
+  | { dst = (`External _ | `NetVM); _ } -> `NAT
+  | { dst = `Client_gateway; proto = `UDP { dport = 53; _ }; _ } ->
+    `NAT_to (`NetVM, 53)
+  | { dst = (`Client_gateway | `Firewall_uplink); _ } ->
+    `Drop "packet addressed to firewall itself"
+  | { dst = `Client _ ; _} -> `Drop "prevent communication between client VMs"
+  in
   (* No existing NAT entry. Check the firewall rules. *)
   match classify t packet with
   | None -> return ()
-  | Some info -> apply_rules t Rules.from_client info
+  | Some info -> apply_rules t (from_client info) info
 
 let ipv4_from_netvm t packet =
   handle_low_memory t >>= function
@@ -166,4 +192,9 @@ let ipv4_from_netvm t packet =
   translate t packet >>= function
   | Some frame -> forward_ipv4 t frame
   | None ->
-  apply_rules t Rules.from_netvm info
+  (* Decide what to do with a packet received from the outside world.
+     Note: If the packet matched an existing NAT rule then this isn't called. *)
+  let from_netvm = function
+      | _ -> `Drop "drop by default"
+  in
+  apply_rules t (from_netvm info) info

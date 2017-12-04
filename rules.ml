@@ -3,10 +3,41 @@
 
 (** Put your firewall rules here. *)
 
-open Packet
+type ('input, 'return) callback = 'input -> 'return
 
-(* OCaml normally warns if you don't match all fields, but that's OK here. *)
-[@@@ocaml.warning "-9"]
+type ('input,'return) decision =
+  | Action of ('input,'return) callback
+    (* "Stop parsing and definitely call my callback on this" *)
+  | No_decision (* "I'm OK with this, check the other rules" *)
+
+type ('input, 'return) rule =
+  'input -> ('input, 'return) decision (* functional firewall, no state!!*)
+
+type ('input,'return) ruleset = ('input, 'return) rule list
+
+let src = Logs.Src.create "firewall" ~doc:"Rules parser"
+module Log = (val Logs.src_log src : Logs.LOG)
+
+let parse_rules (type input) (type return)
+    ~(default_action:(input,return) callback) rules_cs_lst :
+  ((input, return) ruleset, [> `Msg of string ]) result =
+  Log.info (fun m -> m "Read rule file: %S"
+               (Cstruct.(to_string (concat rules_cs_lst)))) ;
+  Ok [fun _ -> Action default_action]
+
+let apply_rules (type input) (type return)
+    ~(default_action : (input,return) callback)
+    (ruleset : (input, return) ruleset)
+    (packet:input)
+  : (input,return) callback =
+  List.fold_left
+    (function
+      | (Action _) as decision -> fun _ignored_rule -> decision
+      | No_decision -> fun check -> check packet
+    ) No_decision ruleset
+  |> function
+  | No_decision -> default_action
+  | Action f -> f
 
 (** {2 Actions}
 
@@ -24,16 +55,3 @@ open Packet
 
     - [`Drop reason] drop the packet and log the reason.
 *)
-
-(** Decide what to do with a packet from a client VM.
-    Note: If the packet matched an existing NAT rule then this isn't called. *)
-let from_client = function
-  | { dst = (`External _ | `NetVM) } -> `NAT
-  | { dst = `Client_gateway; proto = `UDP { dport = 53 } } -> `NAT_to (`NetVM, 53)
-  | { dst = (`Client_gateway | `Firewall_uplink) } -> `Drop "packet addressed to firewall itself"
-  | { dst = `Client _ } -> `Drop "prevent communication between client VMs"
-
-(** Decide what to do with a packet received from the outside world.
-    Note: If the packet matched an existing NAT rule then this isn't called. *)
-let from_netvm = function
-  | _ -> `Drop "drop by default"
