@@ -26,19 +26,20 @@ let main =
       package "mirage-qubes";
       package "mirage-nat";
       package "mirage-logs";
-      (* dependencies for rule parsing: *)
-      package "mirage-block-lwt";
-      package "mirage-block-xen";
-      package "yojson";
+      (* required for rule parsing: *)
+      package "yojson" ;
+      package "mirage-block-lwt" ;
+      package "mirage-block-xen" ;
     ]
     "Unikernel.Main" (mclock @-> block @->job)
 
-let rules_block_device =
-  (* this is where Qubes/Xen maps the
-     "/var/lib/qubes/vm-kernels/THISFIREWALL/modules.img" file *)
+let rules_block =
+(* this is where Xen maps the
+   "/var/lib/qubes/vm-kernels/THISFIREWALL/modules.img" file *)
   block_of_file "xvdd"
+
 
 let () =
   register "qubes-firewall" [main $ default_monotonic_clock
-                                  $ rules_block_device ]
+                                  $ rules_block ]
     ~argv:no_argv

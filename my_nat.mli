@@ -10,9 +10,8 @@ type action = [
   | `Redirect of Mirage_nat.endpoint
 ]
 
-val create : get_time:(unit -> Mirage_nat.time) -> max_entries:int ->
-  ruleset:(Nat_packet.t, unit Lwt.t) Rules.ruleset ->
-  t Lwt.t
+val create : get_time:(unit -> Mirage_nat.time) -> max_entries:int -> t Lwt.t
+
 val reset : t -> unit Lwt.t
 val translate : t -> Nat_packet.t -> Nat_packet.t option Lwt.t
 val add_nat_rule_and_translate : t -> xl_host:Ipaddr.V4.t ->

@@ -9,12 +9,16 @@ type t = private {
   client_eth : Client_eth.t;
   nat : My_nat.t;
   uplink : interface;
+  ingress_rules : Rules.ruleset ;
+  egress_rules : Rules.ruleset ;
 }
 (** A routing table. *)
 
 val create :
   client_eth:Client_eth.t ->
   uplink:interface ->
+  ingress_rules : Rules.ruleset ->
+  egress_rules : Rules.ruleset ->
   nat:My_nat.t ->
   t
 (** [create ~client_eth ~uplink] is a new routing table

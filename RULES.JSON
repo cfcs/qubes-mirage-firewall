@@ -1,0 +1,32 @@
+{"ingress": [
+    {"drop": [ {"src": "netvm"} ],
+     "reason": "drop by default"}
+  ],
+ "egress": [
+    {"drop": [{"dst": {"external_cidr": "8.8.8.8/32"}}],
+     "reason": "do not be evil"},
+
+    {"nat": [{"dst": "netvm"}]},
+
+    {"nat": [{"dst": {"external_cidr": "0.0.0.0/0"}}]},
+
+    {"nat_to": [ {"dst": "client_gateway"},
+              {"proto": {"udp": {"dport_range": 53}}}
+               ],
+     "host": "netvm",
+     "port": "53"
+    },
+
+    {"drop": [{"dst": "client_gateway"}],
+     "reason": "packet addressed to firewall itself"
+    },
+
+    {"drop": [{"dst": "firewall_uplink"}],
+     "reason": "packet addressed to firewall itself"
+    },
+
+    {"drop": [{"dst": {"client_cidr": "0.0.0.0/0"}}],
+     "reason": "prevent communication between client VMs"
+    }
+ ]
+}

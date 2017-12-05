@@ -9,10 +9,12 @@ type t = {
   client_eth : Client_eth.t;
   nat : My_nat.t;
   uplink : interface;
+  ingress_rules : Rules.ruleset ;
+  egress_rules : Rules.ruleset ;
 }
 
-let create ~client_eth ~uplink ~nat =
-  { client_eth; nat; uplink }
+let create ~client_eth ~uplink ~ingress_rules ~egress_rules ~nat =
+  { client_eth; nat; uplink ; ingress_rules; egress_rules }
 
 let target t buf =
   let dst_ip = buf.Ipv4_packet.dst in

@@ -1,4 +1,5 @@
 S .
 B _build
 PKG vchan.xen lwt mirage mirage-net-xen tcpip mirage-nat
-PKG mirage-types mirage-qubes mirage-block-lwt
+PKG mirage-types mirage-qubes mirage-block-lwt yojson
+PKG alcotest

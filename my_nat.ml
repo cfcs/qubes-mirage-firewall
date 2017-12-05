@@ -16,14 +16,13 @@ module Nat = Mirage_nat_lru
 type t = {
   table : Nat.t;
   get_time : unit -> Mirage_nat.time;
-  ruleset : (Nat_packet.t, unit Lwt.t) Rules.ruleset;
 }
 
-let create ~get_time ~max_entries ~ruleset =
+let create ~get_time ~max_entries =
   let tcp_size = 7 * max_entries / 8 in
   let udp_size = max_entries - tcp_size in
   Nat.empty ~tcp_size ~udp_size ~icmp_size:100 >|= fun table ->
-  { get_time; table; ruleset; }
+  { get_time; table }
 
 let translate t packet =
   Nat.translate t.table packet >|= function

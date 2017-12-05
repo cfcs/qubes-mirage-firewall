@@ -12,7 +12,7 @@ module Main (Clock : Mirage_clock_lwt.MCLOCK)
   module Uplink = Uplink.Make(Clock)
 
   (* Set up networking and listen for incoming packets. *)
-  let network ~clock nat qubesDB =
+  let network ~clock ~ingress_rules ~egress_rules nat qubesDB =
     (* Read configuration from QubesDB *)
     let config = Dao.read_network_config qubesDB in
     (* Initialise connection to NetVM *)
@@ -26,6 +26,8 @@ module Main (Clock : Mirage_clock_lwt.MCLOCK)
     let router = Router.create
       ~client_eth
       ~uplink:(Uplink.interface uplink)
+      ~ingress_rules
+      ~egress_rules
       ~nat
     in
     (* Handle packets from both networks *)
@@ -72,10 +74,16 @@ module Main (Clock : Mirage_clock_lwt.MCLOCK)
        | {Mirage_block.sector_size; size_sectors = sector_count_L ; _} ->
          (* Assume this is relatively small: *)
          let sector_count_yolo = Int64.to_int sector_count_L in
-         Array.init sector_count_yolo (fun _ -> Cstruct.create sector_size)
+         let new_count = 2 in
+         let io_page_count = ((new_count*sector_size)-1) / Io_page.page_size in
+         Log.app (fun m -> m "sect size: %d count :%d overridden: %d\
+                              io_pages: %d"
+                     sector_size sector_count_yolo new_count io_page_count) ;
+         Array.init new_count (fun _ -> Io_page.get_buf ~n:io_page_count ())
          |> Array.to_list
      end >>= fun rules_cs_lst ->
-     (Rules_block.read rules_block 0_L rules_cs_lst >>= function
+     ( Log.app (fun m -> m "wtf 1");
+       Rules_block.read rules_block 0_L rules_cs_lst >>= function
        | Ok () -> Lwt.return ()
        | Error _ ->
          failwith "Rules_block.read rules_block: failed to read rules"
@@ -83,12 +91,14 @@ module Main (Clock : Mirage_clock_lwt.MCLOCK)
      ) >>= fun () ->
      Log.info (fun f -> f "Read firewall rules from modules.img") ;
      begin match Rules.parse_rules
-                   ~default_action:(fun _nat_packet_t -> return ())
+                   ~default_ingress:Rules.Accept
+                   ~default_egress:Rules.Accept
                    rules_cs_lst with
      | Ok ruleset -> return ruleset
      | Error (`Msg m) -> failwith m (* TODO also more elegant error handling *)
      end
-    ) >>= fun ruleset ->
+    ) >>= fun (ingress_rules, egress_rules) ->
+    Log.app (fun m -> m "done parsing rules");
     (* Watch for shutdown requests from Qubes *)
     let shutdown_rq =
       OS.Lifecycle.await_shutdown_request () >>= fun (`Poweroff | `Reboot) ->
@@ -96,8 +106,9 @@ module Main (Clock : Mirage_clock_lwt.MCLOCK)
     (* Set up networking *)
     let get_time () = Clock.elapsed_ns clock in
     let max_entries = Key_gen.nat_table_size () in
-    My_nat.create ~get_time ~max_entries ~ruleset >>= fun nat ->
-    let net_listener = network ~clock nat qubesDB in
+    My_nat.create ~get_time ~max_entries >>= fun nat ->
+    let net_listener = network ~clock ~ingress_rules ~egress_rules nat qubesDB
+    in
     (* Report memory usage to XenStore *)
     Memory_pressure.init ();
     (* Run until something fails or we get a shutdown request. *)

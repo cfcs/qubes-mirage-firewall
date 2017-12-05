@@ -1,2 +1,4 @@
 not <main.*>: warn(A-4), strict_sequence
 ".": include
+<test/alcotest*>: package(alcotest logs.fmt cstruct)
+<rules.*>: package(logs cstruct mirage)

@@ -10,12 +10,19 @@ type ports = {
   dport : port; (* Destination *)
 }
 
-type host = 
-  [ `Client of client_link | `Client_gateway | `Firewall_uplink | `NetVM | `External of Ipaddr.t ]
+type host =
+  [ `Client_gateway
+  | `Firewall_uplink
+  | `NetVM
+  | `Client of client_link
+  | `External of Ipaddr.t ]
+
+
+type proto = [ `UDP of ports | `TCP of ports | `ICMP | `Unknown ]
 
 type info = {
   packet : Nat_packet.t;
   src : host;
   dst : host;
-  proto : [ `UDP of ports | `TCP of ports | `ICMP | `Unknown ];
+  proto : proto;
 }

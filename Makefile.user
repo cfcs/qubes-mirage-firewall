@@ -2,6 +2,7 @@ tar: build
 	rm -rf _build/mirage-firewall
 	mkdir _build/mirage-firewall
 	cp qubes_firewall.xen _build/mirage-firewall/vmlinuz
-	touch _build/mirage-firewall/modules.img
+	cp RULES.JSON _build/mirage-firewall/modules.img
+	perl -e 'print " "x4097' >> _build/mirage-firewall/modules.img
 	cat /dev/null | gzip > _build/mirage-firewall/initramfs
 	tar cjf mirage-firewall.tar.bz2 -C _build mirage-firewall

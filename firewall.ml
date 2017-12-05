@@ -116,35 +116,30 @@ let nat_to t ~host ~port packet =
 
 (* Handle incoming packets *)
 
-let apply_rules t (context:[>]) (info:Packet.info) =
-  Rules.apply_rules ~default_action:(fun (_,_)-> return ())
-    Rules.[
-      begin function
-      | `Accept, {dst = `Client client_link ; _} ->
-        Action (fun (_, {packet;_}) -> transmit_ipv4 packet client_link)
-      | `Accept, {dst = (`External _ | `NetVM) ; _} ->
-        Action (function _, {packet;_} -> transmit_ipv4 packet t.Router.uplink)
-      | `Accept, {dst = (`Firewall_uplink | `Client_gateway); _} ->
-        Action (function _, (info:Packet.info) ->
-              Log.warn (fun f ->
-                f "Bad rule: firewall can't accept packets %a" pp_packet info);
-              return ()
-          )
-      | `NAT, _ ->
-        Action (function _, {packet;_} -> add_nat_and_forward_ipv4 t packet)
-      | `NAT_to (host, port), _ ->
-        Action (function _, {packet;_}-> nat_to t packet ~host ~port)
-      | `Drop reason, _ ->
-        Action (function _, _ ->
-            Log.info (fun f -> f "Dropped packet (%s) %a"
-                         reason pp_packet info);
-            return () )
-      | _-> No_decision
-        end
-    ]
-    (context,info)
-  |> fun handle ->
-  handle (context,info)
+let apply_rules t ruleset (info:Packet.info) =
+  begin match Rules.apply_rules ruleset info, info with
+    | Rules.Drop {reason = None }, _ ->
+      Log.app (fun f -> f "TODO DROPPED") ;
+      return ()
+    | Rules.Drop {reason = Some reason}, _ ->
+      Log.app (fun f -> f "TODO DROPPED REASON") ;
+      Log.info (fun f -> f "Dropped packet (%s) %a"
+                   reason pp_packet info);
+      return ()
+    | Rules.Accept, {dst = `Client client_link; packet; _} ->
+      transmit_ipv4 packet client_link
+    | Rules.Accept, {dst = (`External _ | `NetVM) ; packet; _} ->
+      transmit_ipv4 packet t.Router.uplink
+    | Rules.Accept, ({dst = (`Firewall_uplink | `Client_gateway); _} as info) ->
+      Log.warn (fun f ->
+          f "Bad rule: firewall can't accept packets %a" pp_packet info);
+      return ()
+    | Rules.NAT, {packet; _} ->
+      Log.app (fun m -> m "TODO broken NAT???? %a" pp_packet info);
+      add_nat_and_forward_ipv4 t packet
+    | Rules.NAT_to {host; port }, { packet; _} ->
+      nat_to t ~host ~port packet
+  end
 
 let handle_low_memory t =
   match Memory_pressure.status () with
@@ -164,18 +159,10 @@ let ipv4_from_client t packet =
   | None ->
   (* Decide what to do with a packet from a client VM.
      Note: If the packet matched an existing NAT rule then this isn't called. *)
-  let from_client = function
-  | { dst = (`External _ | `NetVM); _ } -> `NAT
-  | { dst = `Client_gateway; proto = `UDP { dport = 53; _ }; _ } ->
-    `NAT_to (`NetVM, 53)
-  | { dst = (`Client_gateway | `Firewall_uplink); _ } ->
-    `Drop "packet addressed to firewall itself"
-  | { dst = `Client _ ; _} -> `Drop "prevent communication between client VMs"
-  in
   (* No existing NAT entry. Check the firewall rules. *)
   match classify t packet with
   | None -> return ()
-  | Some info -> apply_rules t (from_client info) info
+  | Some info -> apply_rules t t.egress_rules info
 
 let ipv4_from_netvm t packet =
   handle_low_memory t >>= function
@@ -194,7 +181,4 @@ let ipv4_from_netvm t packet =
   | None ->
   (* Decide what to do with a packet received from the outside world.
      Note: If the packet matched an existing NAT rule then this isn't called. *)
-  let from_netvm = function
-      | _ -> `Drop "drop by default"
-  in
-  apply_rules t (from_netvm info) info
+  apply_rules t t.ingress_rules info
